@@ -3,7 +3,8 @@ numpy==1.26.4
 pandas
 Pillow
 opencv-python-headless
-dlib==19.24.2
-face-recognition==1.3.0
+deepface
+retina-face
+
 
 
