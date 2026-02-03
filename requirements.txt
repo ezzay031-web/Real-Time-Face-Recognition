@@ -3,8 +3,8 @@ numpy==1.26.4
 pandas
 Pillow
 opencv-python-headless
+tensorflow-cpu==2.15.0
 deepface
-retina-face
 
 
 
