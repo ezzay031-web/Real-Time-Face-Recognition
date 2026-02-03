@@ -1,85 +1,104 @@
+# ===============================
+# FACE RECOGNITION & ATTENDANCE
+# STREAMLIT + DEEPFACE (CLOUD SAFE)
+# ===============================
+
 import streamlit as st
-import face_recognition
-import numpy as np
 import os
+import cv2
+import numpy as np
 import pandas as pd
 from datetime import datetime
 from PIL import Image
+from deepface import DeepFace
+
+# ---------------- CONFIG ----------------
+st.set_page_config(page_title="Face Attendance", layout="centered")
 
 KNOWN_FACES_DIR = "faces_db"
 ATTENDANCE_FILE = "attendance.csv"
 os.makedirs(KNOWN_FACES_DIR, exist_ok=True)
 
-# -------- Load known faces --------
-def load_known_faces():
-    encodings = []
-    names = []
+# ---------------- UI ----------------
+st.title("🧑‍💼 Face Recognition Attendance System")
 
-    for person in os.listdir(KNOWN_FACES_DIR):
-        person_path = os.path.join(KNOWN_FACES_DIR, person)
-        if not os.path.isdir(person_path):
-            continue
+menu = st.sidebar.selectbox(
+    "Select Option",
+    ["Register New Face", "Mark Attendance", "View Attendance"]
+)
 
-        for img_file in os.listdir(person_path):
-            if img_file.endswith(("jpg", "png")):
-                img_path = os.path.join(person_path, img_file)
-                img = face_recognition.load_image_file(img_path)
-                enc = face_recognition.face_encodings(img)
-                if enc:
-                    encodings.append(enc[0])
-                    names.append(person)
-    return encodings, names
+# ---------------- REGISTER FACE ----------------
+if menu == "Register New Face":
+    st.header("➕ Register New Face")
 
-st.title("🎯 Face Recognition Attendance System")
+    name = st.text_input("Enter person name")
+    uploaded_file = st.file_uploader("Upload face image", type=["jpg", "png", "jpeg"])
 
-menu = st.sidebar.selectbox("Menu", ["Register Face", "Mark Attendance", "View Attendance"])
+    if st.button("Save Face"):
+        if name and uploaded_file:
+            img = Image.open(uploaded_file).convert("RGB")
+            save_path = os.path.join(KNOWN_FACES_DIR, f"{name}.jpg")
+            img.save(save_path)
+            st.success(f"✅ {name} registered successfully!")
+        else:
+            st.error("❌ Name and image both required")
 
-known_encodings, known_names = load_known_faces()
-
-# -------- Register --------
-if menu == "Register Face":
-    name = st.text_input("Enter Name")
-    images = st.file_uploader("Upload images", type=["jpg","png"], accept_multiple_files=True)
-
-    if st.button("Save"):
-        if name and images:
-            person_dir = os.path.join(KNOWN_FACES_DIR, name)
-            os.makedirs(person_dir, exist_ok=True)
-
-            for i, img_file in enumerate(images):
-                img = Image.open(img_file)
-                img.save(f"{person_dir}/{i}.jpg")
-
-            st.success("✅ Images saved successfully")
-
-# -------- Attendance --------
+# ---------------- MARK ATTENDANCE ----------------
 elif menu == "Mark Attendance":
-    img_file = st.file_uploader("Upload Image", type=["jpg","png"])
+    st.header("📸 Mark Attendance")
 
-    if img_file:
-        img = face_recognition.load_image_file(img_file)
-        encs = face_recognition.face_encodings(img)
+    uploaded_file = st.file_uploader("Upload image for recognition", type=["jpg", "png", "jpeg"])
 
-        if encs:
-            enc = encs[0]
-            distances = face_recognition.face_distance(known_encodings, enc)
-            name = "Unknown"
+    if uploaded_file:
+        unknown_img = Image.open(uploaded_file).convert("RGB")
+        st.image(unknown_img, caption="Uploaded Image", width=300)
 
-            if len(distances) > 0:
-                best = np.argmin(distances)
-                if distances[best] < 0.48:
-                    name = known_names[best]
+        unknown_path = "temp_unknown.jpg"
+        unknown_img.save(unknown_path)
 
-            st.success(f"🧠 Identified: {name}")
+        identified_name = "Unknown"
 
-            time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            df = pd.DataFrame([[name, time]], columns=["Name","Time"])
-            df.to_csv(ATTENDANCE_FILE, mode="a", index=False, header=not os.path.exists(ATTENDANCE_FILE))
+        for file in os.listdir(KNOWN_FACES_DIR):
+            known_path = os.path.join(KNOWN_FACES_DIR, file)
 
-# -------- View Attendance --------
-else:
+            try:
+                result = DeepFace.verify(
+                    img1_path=unknown_path,
+                    img2_path=known_path,
+                    model_name="Facenet",
+                    detector_backend="retinaface",
+                    enforce_detection=False
+                )
+
+                if result["verified"]:
+                    identified_name = os.path.splitext(file)[0]
+                    break
+
+            except Exception:
+                continue
+
+        st.subheader(f"🧠 Identified: **{identified_name}**")
+
+        # Save attendance
+        time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        df = pd.DataFrame([[identified_name, time]], columns=["Name", "Time"])
+        df.to_csv(
+            ATTENDANCE_FILE,
+            mode="a",
+            index=False,
+            header=not os.path.exists(ATTENDANCE_FILE)
+        )
+
+        st.success("✅ Attendance marked successfully!")
+
+# ---------------- VIEW ATTENDANCE ----------------
+elif menu == "View Attendance":
+    st.header("📊 Attendance Records")
+
     if os.path.exists(ATTENDANCE_FILE):
-        st.dataframe(pd.read_csv(ATTENDANCE_FILE))
+        df = pd.read_csv(ATTENDANCE_FILE)
+        st.dataframe(df)
     else:
-        st.info("No attendance yet")
+        st.info("No attendance recorded yet.")
+
 
