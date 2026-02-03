@@ -1,84 +1,85 @@
 import streamlit as st
 import face_recognition
-import cv2
 import numpy as np
 import os
 import pandas as pd
 from datetime import datetime
 from PIL import Image
 
-st.set_page_config(page_title="Face Recognition System", layout="centered")
-st.title("🧠 Face Recognition & Attendance System")
-
 KNOWN_FACES_DIR = "faces_db"
 ATTENDANCE_FILE = "attendance.csv"
 os.makedirs(KNOWN_FACES_DIR, exist_ok=True)
 
-# ---------------- LOAD KNOWN FACES ----------------
-known_encodings = []
-known_names = []
+# -------- Load known faces --------
+def load_known_faces():
+    encodings = []
+    names = []
 
-for file in os.listdir(KNOWN_FACES_DIR):
-    if file.endswith(".jpg") or file.endswith(".png"):
-        img = face_recognition.load_image_file(os.path.join(KNOWN_FACES_DIR, file))
-        enc = face_recognition.face_encodings(img)
-        if enc:
-            known_encodings.append(enc[0])
-            known_names.append(os.path.splitext(file)[0])
+    for person in os.listdir(KNOWN_FACES_DIR):
+        person_path = os.path.join(KNOWN_FACES_DIR, person)
+        if not os.path.isdir(person_path):
+            continue
 
-# ---------------- REGISTER NEW FACE ----------------
-st.subheader("➕ Register New Face")
-name = st.text_input("Enter person name")
-new_face = st.file_uploader("Upload face image", type=["jpg", "png"], key="register")
+        for img_file in os.listdir(person_path):
+            if img_file.endswith(("jpg", "png")):
+                img_path = os.path.join(person_path, img_file)
+                img = face_recognition.load_image_file(img_path)
+                enc = face_recognition.face_encodings(img)
+                if enc:
+                    encodings.append(enc[0])
+                    names.append(person)
+    return encodings, names
 
-if st.button("Add Face"):
-    if name and new_face:
-        img = Image.open(new_face)
-        img.save(f"{KNOWN_FACES_DIR}/{name}.jpg")
-        st.success(f"{name} added successfully! Restart app to load.")
-    else:
-        st.warning("Name and image both required")
+st.title("🎯 Face Recognition Attendance System")
 
-st.divider()
+menu = st.sidebar.selectbox("Menu", ["Register Face", "Mark Attendance", "View Attendance"])
 
-# ---------------- FACE RECOGNITION ----------------
-st.subheader("🔍 Face Recognition & Attendance")
-uploaded_file = st.file_uploader("Upload image", type=["jpg", "png"], key="detect")
+known_encodings, known_names = load_known_faces()
 
-if uploaded_file:
-    image = np.array(Image.open(uploaded_file))
-    face_locations = face_recognition.face_locations(image)
-    face_encodings = face_recognition.face_encodings(image, face_locations)
+# -------- Register --------
+if menu == "Register Face":
+    name = st.text_input("Enter Name")
+    images = st.file_uploader("Upload images", type=["jpg","png"], accept_multiple_files=True)
 
-    attendance = []
+    if st.button("Save"):
+        if name and images:
+            person_dir = os.path.join(KNOWN_FACES_DIR, name)
+            os.makedirs(person_dir, exist_ok=True)
 
-    for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-        matches = face_recognition.compare_faces(known_encodings, face_encoding)
-        name = "Unknown"
+            for i, img_file in enumerate(images):
+                img = Image.open(img_file)
+                img.save(f"{person_dir}/{i}.jpg")
 
-        if True in matches:
-            idx = matches.index(True)
-            name = known_names[idx]
+            st.success("✅ Images saved successfully")
+
+# -------- Attendance --------
+elif menu == "Mark Attendance":
+    img_file = st.file_uploader("Upload Image", type=["jpg","png"])
+
+    if img_file:
+        img = face_recognition.load_image_file(img_file)
+        encs = face_recognition.face_encodings(img)
+
+        if encs:
+            enc = encs[0]
+            distances = face_recognition.face_distance(known_encodings, enc)
+            name = "Unknown"
+
+            if len(distances) > 0:
+                best = np.argmin(distances)
+                if distances[best] < 0.48:
+                    name = known_names[best]
+
+            st.success(f"🧠 Identified: {name}")
 
             time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            attendance.append([name, time])
+            df = pd.DataFrame([[name, time]], columns=["Name","Time"])
+            df.to_csv(ATTENDANCE_FILE, mode="a", index=False, header=not os.path.exists(ATTENDANCE_FILE))
 
-        cv2.rectangle(image, (left, top), (right, bottom), (0, 255, 0), 2)
-        cv2.putText(image, name, (left, top - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-
-    if attendance:
-        df = pd.DataFrame(attendance, columns=["Name", "Time"])
-        df.to_csv(ATTENDANCE_FILE, mode="a", index=False, header=not os.path.exists(ATTENDANCE_FILE))
-        st.success("Attendance marked!")
-
-    st.image(image, use_column_width=True)
-
-# ---------------- VIEW ATTENDANCE ----------------
-st.divider()
-st.subheader("📊 Attendance Records")
-
-if os.path.exists(ATTENDANCE_FILE):
-    st.dataframe(pd.read_csv(ATTENDANCE_FILE))
+# -------- View Attendance --------
 else:
-    st.info("No attendance recorded yet.")
+    if os.path.exists(ATTENDANCE_FILE):
+        st.dataframe(pd.read_csv(ATTENDANCE_FILE))
+    else:
+        st.info("No attendance yet")
+
